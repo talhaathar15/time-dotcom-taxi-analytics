@@ -1,0 +1,43 @@
+config {
+  type: "table",
+  schema: "taxi_analytics",
+  description: "Daily trip volume compared against the average for that same day-of-week, with US federal holidays in the Oct-Dec 2023 window flagged, to isolate holiday effects from ordinary day-of-week seasonality."
+}
+
+WITH daily AS (
+  SELECT
+    DATE(trip_start_timestamp) AS trip_date,
+    FORMAT_DATE('%A', DATE(trip_start_timestamp)) AS day_of_week,
+    COUNT(*) AS trip_count
+  FROM ${ref("stg_taxi_trips")}
+  WHERE DATE(trip_start_timestamp) != '2023-12-31'  -- excluded: incomplete final day in the source export
+  GROUP BY trip_date, day_of_week
+),
+
+weekday_baseline AS (
+  SELECT
+    day_of_week,
+    AVG(trip_count) AS avg_trips_for_weekday
+  FROM daily
+  GROUP BY day_of_week
+),
+
+holidays AS (
+  SELECT DATE '2023-10-09' AS holiday_date, 'Columbus Day' AS holiday_name UNION ALL
+  SELECT DATE '2023-11-10', 'Veterans Day (observed)' UNION ALL
+  SELECT DATE '2023-11-11', 'Veterans Day (actual)' UNION ALL
+  SELECT DATE '2023-11-23', 'Thanksgiving' UNION ALL
+  SELECT DATE '2023-12-25', 'Christmas'
+)
+
+SELECT
+  d.trip_date,
+  d.day_of_week,
+  h.holiday_name,
+  d.trip_count,
+  ROUND(w.avg_trips_for_weekday, 0) AS avg_trips_for_that_weekday,
+  ROUND((d.trip_count - w.avg_trips_for_weekday) / w.avg_trips_for_weekday * 100, 1) AS pct_diff_from_weekday_avg
+FROM daily d
+JOIN weekday_baseline w ON d.day_of_week = w.day_of_week
+LEFT JOIN holidays h ON d.trip_date = h.holiday_date
+ORDER BY d.trip_date
