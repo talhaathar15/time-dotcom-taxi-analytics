@@ -1,0 +1,30 @@
+config {
+  type: "table",
+  schema: "taxi_analytics",
+  description: "Cleaned taxi trips for Oct-Dec 2023, excluding implausible fare/speed outliers and rows with missing timestamps."
+}
+
+SELECT
+  unique_key,
+  taxi_id,
+  trip_start_timestamp,
+  trip_end_timestamp,
+  trip_seconds,
+  trip_miles,
+  fare,
+  tips,
+  tolls,
+  extras,
+  trip_total,
+  payment_type,
+  UPPER(TRIM(REPLACE(company, ',', ''))) AS company,
+  pickup_community_area,
+  dropoff_community_area
+FROM `bigquery-public-data.chicago_taxi_trips.taxi_trips`
+WHERE trip_start_timestamp BETWEEN '2023-10-01' AND '2023-12-31'
+  AND trip_end_timestamp IS NOT NULL
+  AND trip_seconds > 0
+  AND NOT (
+    SAFE_DIVIDE(trip_miles, trip_seconds/3600.0) > 60
+    OR SAFE_DIVIDE(fare, trip_seconds/60.0) > 10
+  )
