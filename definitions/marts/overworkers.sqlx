@@ -1,0 +1,33 @@
+config {
+  type: "table",
+  schema: "taxi_analytics",
+  description: "Top 100 'overworker' taxis: taxis that regularly work long shifts (>12 hours, in at least 40% of their shifts) without a genuine 8-hour break. Ranked by total hours spent in long shifts. Excludes shifts over 16 hours, which likely reflect multiple drivers rotating on the same vehicle rather than one person's continuous work."
+}
+
+WITH taxi_shift_stats AS (
+  SELECT
+    taxi_id,
+    company,
+    COUNT(*) AS total_plausible_shifts,
+    COUNTIF(shift_hours > 12) AS long_shift_count,
+    ROUND(COUNTIF(shift_hours > 12) * 100.0 / COUNT(*), 2) AS pct_long_shifts,
+    ROUND(SUM(IF(shift_hours > 12, shift_hours, 0)), 2) AS total_long_shift_hours,
+    ROUND(AVG(shift_hours), 2) AS avg_shift_hours
+  FROM ${ref("int_taxi_shifts")}
+  WHERE is_plausible_single_driver_shift
+  GROUP BY taxi_id, company
+  HAVING total_plausible_shifts >= 10
+)
+
+SELECT
+  taxi_id,
+  company,
+  total_plausible_shifts,
+  long_shift_count,
+  pct_long_shifts,
+  total_long_shift_hours,
+  avg_shift_hours
+FROM taxi_shift_stats
+WHERE pct_long_shifts >= 40
+ORDER BY total_long_shift_hours DESC
+LIMIT 100
