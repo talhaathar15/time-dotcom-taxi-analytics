@@ -1,0 +1,18 @@
+config {
+  type: "table",
+  schema: "taxi_analytics",
+  description: "Top 100 taxis by total recorded tips, Oct-Dec 2023 (the dataset's most recent 3 months)."
+}
+
+SELECT
+  taxi_id,
+  company,
+  COUNT(*) AS total_trips,
+  ROUND(SUM(fare), 2) AS total_fare,
+  ROUND(SUM(tips), 2) AS total_tips,
+  ROUND(SUM(trip_total), 2) AS total_trip_revenue,
+  ROUND(SUM(tips) / NULLIF(COUNT(*), 0), 2) AS avg_tip_per_trip
+FROM ${ref("stg_taxi_trips")}
+GROUP BY taxi_id, company
+ORDER BY total_tips DESC
+LIMIT 100
