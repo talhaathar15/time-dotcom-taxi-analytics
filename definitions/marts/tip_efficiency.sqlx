@@ -1,0 +1,52 @@
+config {
+  type: "table",
+  schema: "taxi_analytics",
+  description: "Bonus insight: tips-per-hour worked, as an alternative to raw total tips. Cross-references against the overworkers mart to show overlap between 'top earners' and 'overworkers'."
+}
+
+WITH tips_per_taxi AS (
+  SELECT
+    taxi_id,
+    company,
+    SUM(tips) AS total_tips,
+    COUNT(*) AS total_trips
+  FROM ${ref("stg_taxi_trips")}
+  GROUP BY taxi_id, company
+),
+
+hours_per_taxi AS (
+  SELECT
+    taxi_id,
+    SUM(shift_hours) AS total_hours_worked
+  FROM ${ref("int_taxi_shifts")}
+  WHERE is_plausible_single_driver_shift
+  GROUP BY taxi_id
+),
+
+efficiency AS (
+  SELECT
+    t.taxi_id,
+    t.company,
+    t.total_tips,
+    t.total_trips,
+    h.total_hours_worked,
+    ROUND(t.total_tips / NULLIF(h.total_hours_worked, 0), 2) AS tips_per_hour
+  FROM tips_per_taxi t
+  JOIN hours_per_taxi h ON t.taxi_id = h.taxi_id
+  WHERE h.total_hours_worked >= 50
+)
+
+SELECT
+  e.taxi_id,
+  e.company,
+  e.total_tips,
+  e.total_trips,
+  e.total_hours_worked,
+  e.tips_per_hour,
+  te.taxi_id IS NOT NULL AS is_also_top_100_total_tips,
+  ow.taxi_id IS NOT NULL AS is_also_top_100_overworker
+FROM efficiency e
+LEFT JOIN ${ref("tip_earners")} te ON e.taxi_id = te.taxi_id
+LEFT JOIN ${ref("overworkers")} ow ON e.taxi_id = ow.taxi_id
+ORDER BY tips_per_hour DESC
+LIMIT 100
