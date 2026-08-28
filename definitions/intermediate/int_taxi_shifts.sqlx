@@ -1,0 +1,46 @@
+config {
+  type: "table",
+  schema: "taxi_analytics",
+  description: "One row per detected shift per taxi. A new shift starts when the gap since the previous trip's end is >= 8 hours (per the assessment's stated break threshold). Shifts longer than 16 hours are flagged as not plausible for a single driver, since the raw taxi_id represents the vehicle/medallion, which may be operated by multiple drivers in rotation."
+}
+
+WITH gaps AS (
+  SELECT
+    taxi_id,
+    company,
+    trip_start_timestamp,
+    trip_end_timestamp,
+    LAG(trip_end_timestamp) OVER (PARTITION BY taxi_id ORDER BY trip_start_timestamp) AS prev_trip_end
+  FROM ${ref("stg_taxi_trips")}
+),
+
+flagged AS (
+  SELECT
+    *,
+    CASE
+      WHEN prev_trip_end IS NULL
+        OR TIMESTAMP_DIFF(trip_start_timestamp, prev_trip_end, MINUTE) >= 480
+      THEN 1 ELSE 0
+    END AS is_new_shift
+  FROM gaps
+),
+
+shift_groups AS (
+  SELECT
+    *,
+    SUM(is_new_shift) OVER (PARTITION BY taxi_id ORDER BY trip_start_timestamp) AS shift_id
+  FROM flagged
+)
+
+SELECT
+  taxi_id,
+  company,
+  shift_id,
+  MIN(trip_start_timestamp) AS shift_start,
+  MAX(trip_end_timestamp) AS shift_end,
+  ROUND(TIMESTAMP_DIFF(MAX(trip_end_timestamp), MIN(trip_start_timestamp), MINUTE) / 60.0, 2) AS shift_hours,
+  COUNT(*) AS trips_in_shift,
+  DATE_DIFF(DATE(MAX(trip_end_timestamp)), DATE(MIN(trip_start_timestamp)), DAY) + 1 AS calendar_days_spanned,
+  ROUND(TIMESTAMP_DIFF(MAX(trip_end_timestamp), MIN(trip_start_timestamp), MINUTE) / 60.0, 2) <= 16 AS is_plausible_single_driver_shift
+FROM shift_groups
+GROUP BY taxi_id, company, shift_id
